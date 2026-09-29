@@ -1,0 +1,54 @@
+name: Extract emails
+
+on:
+  workflow_dispatch:
+    inputs:
+      shards:
+        description: "Nombre de shards (doit correspondre à la matrix)"
+        default: "10"
+
+permissions:
+  contents: write
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install httpx
+
+      - name: Crawl (reprend via results/done_<shard>.txt)
+        run: |
+          python crawl_emails.py agences_immobilieres_final.csv \
+            --shard ${{ matrix.shard }} --shards 10 --max-minutes 320
+
+      - name: Commit checkpoint + résultats
+        if: always()
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add results/
+          git diff --cached --quiet && exit 0
+          git commit -m "emails shard ${{ matrix.shard }}"
+          for i in 1 2 3 4 5; do
+            git pull --rebase -X theirs && git push && break
+            sleep $((RANDOM % 10 + 3))
+          done
+
+      - name: Backup artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emails-shard-${{ matrix.shard }}
+          path: results/*_${{ matrix.shard }}.*
+          
